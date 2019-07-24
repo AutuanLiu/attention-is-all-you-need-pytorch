@@ -16,9 +16,11 @@ class MultiHeadAttention(nn.Module):
         self.d_k = d_k
         self.d_v = d_v
 
-        self.w_qs = nn.Linear(d_model, n_head * d_k)
-        self.w_ks = nn.Linear(d_model, n_head * d_k)
-        self.w_vs = nn.Linear(d_model, n_head * d_v)
+        self.w_qs = nn.Linear(d_model, n_head * d_k)  # query 的权重
+        self.w_ks = nn.Linear(d_model, n_head * d_k)  # key 的权重
+        self.w_vs = nn.Linear(d_model, n_head * d_v)  # value 的权重
+
+        # 初始化方法 N(0, 2./(d_model + d))
         nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
         nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
         nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_v)))
@@ -40,8 +42,10 @@ class MultiHeadAttention(nn.Module):
         sz_b, len_k, _ = k.size()
         sz_b, len_v, _ = v.size()
 
+        # 残差是 Q 针对 self-attention或者attention都适用
         residual = q
 
+        # split 为 head 部分
         q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
         k = self.w_ks(k).view(sz_b, len_k, n_head, d_k)
         v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
@@ -52,12 +56,18 @@ class MultiHeadAttention(nn.Module):
 
         if mask is not None:
             mask = mask.repeat(n_head, 1, 1)  # (n*b) x .. x ..
+        
+        # attn 代表 V 的权重
         output, attn = self.attention(q, k, v, mask=mask)
 
+        # merge
         output = output.view(n_head, sz_b, len_q, d_v)
         output = output.permute(1, 2, 0, 3).contiguous().view(sz_b, len_q, -1) # b x lq x (n*dv)
 
+        # 全连接层之后扔掉一部分数值
         output = self.dropout(self.fc(output))
+
+        # 残差连接并且做 layernorm
         output = self.layer_norm(output + residual)
 
         return output, attn
@@ -67,6 +77,7 @@ class PositionwiseFeedForward(nn.Module):
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
+        # 全连接层或者一维的卷积操作，kernel size=1
         self.w_1 = nn.Conv1d(d_in, d_hid, 1) # position-wise
         self.w_2 = nn.Conv1d(d_hid, d_in, 1) # position-wise
         self.layer_norm = nn.LayerNorm(d_in)
@@ -74,9 +85,12 @@ class PositionwiseFeedForward(nn.Module):
 
     def forward(self, x):
         residual = x
-        output = x.transpose(1, 2)
+        output = x.transpose(1, 2) 
+        
+        # 使用relu作为激活函数
         output = self.w_2(F.relu(self.w_1(output)))
         output = output.transpose(1, 2)
+        # 在 layernorm 之前都要做 dropout
         output = self.dropout(output)
         output = self.layer_norm(output + residual)
         return output

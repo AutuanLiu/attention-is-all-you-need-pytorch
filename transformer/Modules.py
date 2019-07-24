@@ -8,6 +8,7 @@ class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
 
     def __init__(self, temperature, attn_dropout=0.1):
+        # temperature 代表的是 放缩因子 scale factor
         super().__init__()
         self.temperature = temperature
         self.dropout = nn.Dropout(attn_dropout)
@@ -22,6 +23,8 @@ class ScaledDotProductAttention(nn.Module):
             attn = attn.masked_fill(mask, -np.inf)
 
         attn = self.softmax(attn)
+        # value的权重做dropout，扔掉一部分value
+        # attention 指的是value的对应权重
         attn = self.dropout(attn)
         output = torch.bmm(attn, v)
 

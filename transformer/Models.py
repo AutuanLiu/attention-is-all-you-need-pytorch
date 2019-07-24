@@ -9,6 +9,7 @@ __author__ = "Yu-Hsiang Huang"
 
 def get_non_pad_mask(seq):
     assert seq.dim() == 2
+    # torch.ne 相等是 0 不相等是 1
     return seq.ne(Constants.PAD).type(torch.float).unsqueeze(-1)
 
 def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
@@ -54,24 +55,21 @@ def get_subsequent_mask(seq):
 class Encoder(nn.Module):
     ''' A encoder model with self attention mechanism. '''
 
-    def __init__(
-            self,
-            n_src_vocab, len_max_seq, d_word_vec,
-            n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1):
+    def __init__(self, n_src_vocab, len_max_seq, d_word_vec, n_layers, n_head, d_k, d_v, d_model, d_inner, dropout=0.1):
 
         super().__init__()
 
         n_position = len_max_seq + 1
         self.dropout_emb = nn.Dropout(dropout)
 
-        self.src_word_emb = nn.Embedding(
-            n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
+        # 输入的词嵌入
+        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
 
+        # 位置的编码，使用预训练嵌入，并且不可更新
         self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
-            freeze=True)
+            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0), freeze=True)
 
+        # 6层的叠加
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
@@ -85,10 +83,13 @@ class Encoder(nn.Module):
         non_pad_mask = get_non_pad_mask(src_seq)
 
         # -- Forward
+        # 词嵌入和位置编码的和，并且做 dropout 作为编码器层的输入
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
         enc_output = self.dropout_emb(enc_output)
 
+        # 6 层编码器的叠加计算
         for enc_layer in self.layer_stack:
+            # 每层都更新编码器的输出，原地操作
             enc_output, enc_slf_attn = enc_layer(
                 enc_output,
                 non_pad_mask=non_pad_mask,
@@ -112,9 +113,10 @@ class Decoder(nn.Module):
         super().__init__()
         n_position = len_max_seq + 1
 
-        self.tgt_word_emb = nn.Embedding(
-            n_tgt_vocab, d_word_vec, padding_idx=Constants.PAD)
+        # 输出目标的词嵌入
+        self.tgt_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=Constants.PAD)
 
+        # 位置编码
         self.position_enc = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
@@ -179,6 +181,7 @@ class Transformer(nn.Module):
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
             dropout=dropout)
 
+        # 最后的线性层
         self.tgt_word_prj = nn.Linear(d_model, n_tgt_vocab, bias=False)
         nn.init.xavier_normal_(self.tgt_word_prj.weight)
 
@@ -200,7 +203,7 @@ class Transformer(nn.Module):
             self.encoder.src_word_emb.weight = self.decoder.tgt_word_emb.weight
 
     def forward(self, src_seq, src_pos, tgt_seq, tgt_pos):
-
+        # 以源输入和位置、目标输入和位置作为输入
         tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
 
         enc_output, *_ = self.encoder(src_seq, src_pos)
